@@ -591,6 +591,15 @@ class _GroupByKeyOnlyEvaluator(_TransformEvaluator):
         self._applied_ptransform.transform.get_type_hints().input_types[0])
     self.key_coder = coders.registry.get_coder(kv_type_hint[0].tuple_types[0])
 
+    # clear all unmerged states
+    for encoded_k in self.step_context.keyed_existing_state:
+      # Ignore global state.
+      if encoded_k is None:
+        continue
+      k = self.key_coder.decode(encoded_k)
+      state = self.step_context.get_keyed_state(encoded_k)
+      state.clear_unmerged_states()
+
   def process_timer(self, timer_firing):
     # We do not need to emit a KeyedWorkItem to process_element().
     pass
@@ -604,7 +613,17 @@ class _GroupByKeyOnlyEvaluator(_TransformEvaluator):
       k, v = element.value
       encoded_k = self.key_coder.encode(k)
       state = self.step_context.get_keyed_state(encoded_k)
-      state.add_state(None, _GroupByKeyOnlyEvaluator.ELEMENTS_TAG, v)
+      state.add_unmerged_state(None, _GroupByKeyOnlyEvaluator.ELEMENTS_TAG, v)
+      # Do not add the state immediately, 1) have the DirectUnmergedState keep
+      # track of the additions that have been made, 2) pass them to the
+      # TransformResult, which is returned by finish_bundle.
+      # Java: 1) Make a copy of the state every time the state is accessed,
+      # 2) When TransformResult is processed, apply the state (at this
+      # point the bundle finished successfully).
+      # mgh
+      # Option: instead of the previous 2 instructions,
+      # Send over encoded_k and v for DirectUnmergedState to save them
+
     else:
       raise TypeCheckError('Input to _GroupByKeyOnly must be a PCollection of '
                            'windowed key-value pairs. Instead received: %r.'
@@ -627,6 +646,7 @@ class _GroupByKeyOnlyEvaluator(_TransformEvaluator):
             continue
           k = self.key_coder.decode(encoded_k)
           state = self.step_context.get_keyed_state(encoded_k)
+          state.merge_unmerged_state()
           vs = state.get_state(None, _GroupByKeyOnlyEvaluator.ELEMENTS_TAG)
           gbk_result.append(GlobalWindows.windowed_value((k, vs)))
 
@@ -640,6 +660,10 @@ class _GroupByKeyOnlyEvaluator(_TransformEvaluator):
 
       self.global_state.add_state(
           None, _GroupByKeyOnlyEvaluator.COMPLETION_TAG, True)
+      # Option:
+      # replace the add_state here with another funtion that merges
+      # the _unmerged_state and the global state
+      # self.global_state.merge_unmerged_state(unmerged_state)
       hold = WatermarkManager.WATERMARK_POS_INF
     else:
       bundles = []

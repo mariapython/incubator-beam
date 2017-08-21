@@ -315,7 +315,17 @@ class DirectUnmergedState(InMemoryUnmergedState):
 
   def __init__(self):
     super(DirectUnmergedState, self).__init__(defensive_copy=False)
+    self._unmerged_state = []   # mgh
 
+  def add_unmerged_state(self, window, tag, value):
+    self._unmerged_state.append((window, tag, value))
+
+  def merge_unmerged_state(self):
+    for window, key, value in self._unmerged_state:
+      super(DirectUnmergedState, self).add_state(window, key, value)
+
+  def clear_unmerged_states(self):
+    self._unmerged_state = []
 
 class DirectStepContext(object):
   """Context for the currently-executing step."""
@@ -329,3 +339,7 @@ class DirectStepContext(object):
     if not self.keyed_existing_state.get(key):
       self.keyed_existing_state[key] = DirectUnmergedState()
     return self.keyed_existing_state[key]
+
+  def add_unmerged_state(self, key, value):   # mgh
+    pass
+    # Option: save key, value to _unmerged_state
