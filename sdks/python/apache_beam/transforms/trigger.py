@@ -47,6 +47,7 @@ __all__ = [
     'TriggerFn',
     'DefaultTrigger',
     'AfterWatermark',
+    'AfterProcessingTime',
     'AfterCount',
     'Repeatedly',
     'AfterAny',
@@ -207,6 +208,7 @@ class TriggerFn(object):
         'after_any': AfterAny,
         'after_each': AfterEach,
         'after_end_of_window': AfterWatermark,
+        'after_processing_time': AfterProcessingTime,
         # after_processing_time, after_synchronized_processing_time
         # always
         'default': DefaultTrigger,
@@ -258,6 +260,172 @@ class DefaultTrigger(TriggerFn):
   def to_runner_api(self, unused_context):
     return beam_runner_api_pb2.Trigger(
         default=beam_runner_api_pb2.Trigger.Default())
+
+
+class AfterProcessingTime(TriggerFn):            # mgh: v2
+  """Fire exactly once after a specified delay from processing time."""
+  LATE_TAG = _CombiningValueStateTag('is_late', any)
+
+  def __init__(self, delay=0):
+    print '--> APT __init__'
+    self.delay = delay
+    # self.timestamp = None         # mght3
+
+  def __repr__(self):
+    return 'AfterProcessingTime(delay=%d)' % self.delay
+
+  # def is_late(self, context):
+  #   return self.late and context.get_state(self.LATE_TAG)
+
+  # def on_element(self, element, window, context, processing_time): # mght1
+  def on_element(self, element, window, context):
+    print '--> APT on_element'
+    # context.set_timer('', TimeDomain.REAL_TIME, processing_time + self.delay)  # mght1
+    context.set_timer('', TimeDomain.REAL_TIME, self.delay)  # mght2
+    # clock = context.__dict__.get('_clock') or context._outer._clock  # mght3
+    # self.timestamp = clock.time()   # mght3
+
+  def on_merge(self, to_be_merged, merge_result, context):
+    for window in to_be_merged:
+      if window.end != merge_result.end:
+        context.clear_timer('', TimeDomain.REAL_TIME)    # mgh
+    # # TODO(robertwb): Figure out whether the 'rewind' semantics could be used
+    # # here.
+    # if self.is_late(context):
+    #   self.late.on_merge(
+    #       to_be_merged, merge_result, NestedContext(context, 'late'))
+    # else:
+    #   # Note: Timer clearing solely an optimization.
+    #   for window in to_be_merged:
+    #     if window.end != merge_result.end:
+    #       context.clear_timer('', TimeDomain.REAL_TIME)    # mgh
+    #   if self.early:
+    #     self.early.on_merge(
+    #         to_be_merged, merge_result, NestedContext(context, 'early'))
+
+  def should_fire(self, watermark, window, context):
+    print '--> in should_fire'
+    # return True
+    return False  # ccy: so that it doesn't finish
+    # # if self.on_fire()         # mght3
+    # # pass
+    # clock = context.__dict__.get('_clock') or context._outer._clock
+    # if clock.time() > self.timestamp + self.delay:
+    #   print 'firing processing timer'
+    #   return True
+    # print 'not firing processing timer'
+    # return False
+
+    ###
+    # clock = context._clock or context._outer._clock
+    # clock = context.__dict__.get('clock') or context._outer._clock
+    # if clock.time() > self.expired_time:
+    #   print 'firing'
+    #   return True
+    # print 'not firing'
+    # return False
+
+  def on_fire(self, watermark, window, context):
+    return True
+    # should return
+
+  def reset(self, window, context):
+    pass
+
+  # def __eq__(self, other):
+  #   return (type(self) == type(other)
+  #           and self.early == other.early
+  #           and self.late == other.late)
+  #
+  # def __hash__(self):
+  #   return hash((type(self), self.early, self.late))
+
+  @staticmethod
+  def from_runner_api(proto, context):
+    print '--> APT from_runner_api'
+    return AfterProcessingTime(
+        delay=proto.after_processing_time.timestamp_transforms[0].delay.delay_millis)
+
+
+  def to_runner_api(self, context):
+    print '--> APT to_runner_api', self
+    delay_proto = beam_runner_api_pb2.TimestampTransform(
+      delay=beam_runner_api_pb2.TimestampTransform.Delay(
+        delay_millis=self.delay
+      )
+    )
+    return beam_runner_api_pb2.Trigger(
+        after_processing_time=beam_runner_api_pb2.Trigger.AfterProcessingTime(
+            timestamp_transforms=[delay_proto]))
+
+
+
+# class AfterProcessingTime(TriggerFn):                 # mgh: v1
+#   # should_fire will look at real time, not watermark
+
+#   # COUNT_TAG = _CombiningValueStateTag('count', combiners.CountCombineFn())
+
+#   def __init__(self, delay):
+#     print 'xxx'
+#     import time
+#     self.delay = delay
+#     # TODO: use clock instead of time direclty
+#     self.expired_time = time.time() + delay
+
+#   def __repr__(self):
+#     return 'AfterProcessingTime(%s)' % self.delay
+
+#   def __eq__(self, other):
+#     return type(self) == type(other) and self.expired_time == other.expired_time
+
+#   def on_element(self, element, window, context):
+#     print 'AfterProcessingTime on_element'
+#     pass
+
+#   def on_merge(self, to_be_merged, merge_result, context):
+#     # states automatically merged
+#     print 'AfterProcessingTime on_merge'
+#     pass
+
+#   def should_fire(self, watermark, window, context):
+#     # return context.get_state(self.COUNT_TAG) >= self.count
+#     if time.time() > self.expired_time:
+#       print 'firing processing timer'
+#       return True
+#     print 'not firing processing timer'
+#     return False
+
+#   def on_fire(self, watermark, window, context):
+#     return True
+
+#   def reset(self, window, context):
+#     # context.clear_state(self.COUNT_TAG)
+#     self.delay = 0
+#     self.expired_time = 0
+
+  # @staticmethod
+  # def from_runner_api(proto, unused_context):
+  #   print '\n\nfrom_runner_api\n\n'
+  #   # TODO: how to deal with the array of timestamp_transforms?
+  #   return AfterProcessingTime(
+  #     delay=proto.after_processing_time.timestamp_transforms[0].delay.delay_millis
+  #   )
+
+  # def to_runner_api(self, unused_context):
+  #   print '\n\nto_runner_api\n\n'
+  #   timestamp_transform = beam_runner_api_pb2.TimestampTransform(
+  #     delay=beam_runner_api_pb2.TimestampTransform.Delay(
+  #       delay_millis=self.delay
+  #     )
+  #   )
+
+  #   trigger = beam_runner_api_pb2.Trigger(
+  #     after_processing_time=beam_runner_api_pb2.Trigger.AfterProcessingTime(
+  #       timestamp_transforms=[timestamp_transform]
+  #       # timestamp_transforms=timestamp_transform
+  #     )
+  #   )
+  #   return trigger
 
 
 class AfterWatermark(TriggerFn):
@@ -591,6 +759,7 @@ class AfterEach(TriggerFn):
       return ix == len(self.triggers)
 
   def reset(self, window, context):
+    # context.clearing_state(self.INDEX_TAG) # j
     context.clear_state(self.INDEX_TAG)
     for ix, trigger in enumerate(self.triggers):
       trigger.reset(window, self._sub_context(context, ix))
@@ -633,11 +802,22 @@ class OrFinally(AfterAny):
 
 class TriggerContext(object):
 
-  def __init__(self, outer, window):
+  # def __init__(self, outer, window):
+  #   self._outer = outer
+  #   self._window = window
+
+  def __init__(self, outer, window, clock):        # mght2
     self._outer = outer
     self._window = window
+    self._clock = clock
 
-  def set_timer(self, name, time_domain, timestamp):
+  # def set_timer(self, name, time_domain, timestamp):
+  #   self._outer.set_timer(self._window, name, time_domain, timestamp)
+
+  def set_timer(self, name, time_domain, timestamp):        # mght2
+    if self._clock and time_domain == TimeDomain.REAL_TIME:
+      print '--> inside set_timer (TriggerContext)'
+      timestamp += self._clock.time()
     self._outer.set_timer(self._window, name, time_domain, timestamp)
 
   def clear_timer(self, name, time_domain):
@@ -709,8 +889,11 @@ class SimpleState(object):
   def clear_state(self, window, tag):
     pass
 
-  def at(self, window):
-    return TriggerContext(self, window)
+  # def at(self, window):
+  #   return TriggerContext(self, window)
+
+  def at(self, window, clock=None):                         # mght2
+    return TriggerContext(self, window, clock)
 
 
 class UnmergedState(SimpleState):
@@ -832,7 +1015,8 @@ class MergeableStateAdapter(SimpleState):
                        repr(self.raw_state).split('\n'))
 
 
-def create_trigger_driver(windowing, is_batch=False, phased_combine_fn=None):
+# def create_trigger_driver(windowing, is_batch=False, phased_combine_fn=None):   # mght
+def create_trigger_driver(windowing, is_batch=False, phased_combine_fn=None, clock=None):
   """Create the TriggerDriver for the given windowing and options."""
 
   # TODO(robertwb): We can do more if we know elements are in timestamp
@@ -840,7 +1024,8 @@ def create_trigger_driver(windowing, is_batch=False, phased_combine_fn=None):
   if windowing.is_default() and is_batch:
     driver = DefaultGlobalBatchTriggerDriver()
   else:
-    driver = GeneralTriggerDriver(windowing)
+    # driver = GeneralTriggerDriver(windowing)
+    driver = GeneralTriggerDriver(windowing, clock)  # mght
 
   if phased_combine_fn:
     # TODO(ccy): Refactor GeneralTriggerDriver to combine values eagerly using
@@ -953,7 +1138,10 @@ class GeneralTriggerDriver(TriggerDriver):
   ELEMENTS = _ListStateTag('elements')
   TOMBSTONE = _CombiningValueStateTag('tombstone', combiners.CountCombineFn())
 
-  def __init__(self, windowing):
+  def __init__(self, windowing, clock=None):
+    # mgh: Add a clock arg
+    # print 'inside GTD, clock:', clock
+    self.clock = clock
     self.window_fn = windowing.windowfn
     self.timestamp_combiner_impl = TimestampCombiner.get_impl(
         windowing.timestamp_combiner, self.window_fn)
@@ -1017,13 +1205,17 @@ class GeneralTriggerDriver(TriggerDriver):
            (self.timestamp_combiner_impl.assign_output_time(window, timestamp)
             for unused_value, timestamp in elements)
            if element_output_time >= output_watermark))
+      print 'elements, output_time in process_elements', elements, output_time
       if output_time is not None:
+        print 'setting_hold, current watermark:', output_time, output_watermark
         state.add_state(window, self.WATERMARK_HOLD, output_time)
 
-      context = state.at(window)
+      # context = state.at(window)
+      context = state.at(window, self.clock)               # mght2
       for value, unused_timestamp in elements:
         state.add_state(window, self.ELEMENTS, value)
         self.trigger_fn.on_element(value, window, context)
+        # self.trigger_fn.on_element(value, window, context, self.clock.time()) # mght1
 
       # Maybe fire this window.
       watermark = MIN_TIMESTAMP
@@ -1033,6 +1225,7 @@ class GeneralTriggerDriver(TriggerDriver):
 
   def process_timer(self, window_id, unused_name, time_domain, timestamp,
                     state):
+    print '--> time_domain in process_timer:', time_domain
     if self.is_merging:
       state = MergeableStateAdapter(state)
     window = state.get_window(window_id)
@@ -1040,12 +1233,24 @@ class GeneralTriggerDriver(TriggerDriver):
       return
     if time_domain == TimeDomain.WATERMARK:
       if not self.is_merging or window in state.known_windows():
-        context = state.at(window)
+        # context = state.at(window)
+        context = state.at(window, self.clock)               # mght2
         if self.trigger_fn.should_fire(timestamp, window, context):
           finished = self.trigger_fn.on_fire(timestamp, window, context)
           yield self._output(window, finished, state)
+    # mgh: if time_domain == TimeDomain.REAL_TIME:
+    elif time_domain == TimeDomain.REAL_TIME:
+      # if the timestamp is greater than the timestamp of the timer, fire.
+      # the timestampt here comes from the timer I am setting.
+      context = state.at(window, self.clock)
+      if self.clock.time() > timestamp:
+        print 'FIRE!! (clock > timestamp in trigger)'
+        self.trigger_fn.on_fire(timestamp, window, context)
+        finished = self.trigger_fn.should_fire(timestamp, window, context)
+        yield self._output(window, finished, state)
     else:
       raise Exception('Unexpected time domain: %s' % time_domain)
+    print '... leaving process_timer'
 
   def _output(self, window, finished, state):
     """Output window and clean up if appropriate."""
@@ -1063,6 +1268,9 @@ class GeneralTriggerDriver(TriggerDriver):
       # If no watermark hold was set, output at end of window.
       timestamp = window.end
     else:
+      print 'releasing hold:', timestamp
+      # import traceback
+      # traceback.print_stack()
       state.clear_state(window, self.WATERMARK_HOLD)
 
     return WindowedValue(values, timestamp, (window,))
@@ -1099,6 +1307,7 @@ class InMemoryUnmergedState(UnmergedState):
     return self.global_state.get(tag.tag, default)
 
   def set_timer(self, window, name, time_domain, timestamp):
+    # print 'SET TIMER', window, name, time_domain, timestamp   # ccy
     self.timers[window][(name, time_domain)] = timestamp
 
   def clear_timer(self, window, name, time_domain):
@@ -1149,10 +1358,13 @@ class InMemoryUnmergedState(UnmergedState):
     Expiration is measured against the watermark for event-time timers,
     and against a wall clock for processing-time timers.
     """
+    print '--> inside get_timers (InMemoryUnmergedState)...'
     expired = []
     has_realtime_timer = False
     for window, timers in list(self.timers.items()):
+      # print 'GET', window, timers, watermark, processing_time   # ccy
       for (name, time_domain), timestamp in list(timers.items()):
+        print 'There is an expired %s timer with timestamp %s' %(time_domain, timestamp)
         if time_domain == TimeDomain.REAL_TIME:
           time_marker = processing_time
           has_realtime_timer = True
@@ -1168,6 +1380,9 @@ class InMemoryUnmergedState(UnmergedState):
             del timers[(name, time_domain)]
       if not timers and clear:
         del self.timers[window]
+    print '... leaving get_timers with expired:', expired   # ccy
+    # import traceback
+    # traceback.print_stack()
     return expired, has_realtime_timer
 
   def get_and_clear_timers(self, watermark=MAX_TIMESTAMP):

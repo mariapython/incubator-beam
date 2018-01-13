@@ -322,6 +322,7 @@ class TransformExecutor(_ExecutorService.CallableTask):
   def attempt_call(self, metrics_container,
                    scoped_metrics_container,
                    side_input_values):
+    print '--> in attempt_call'
     evaluator = self._transform_evaluator_registry.get_evaluator(
         self._applied_ptransform, self._input_bundle,
         side_input_values, scoped_metrics_container)
@@ -331,6 +332,7 @@ class TransformExecutor(_ExecutorService.CallableTask):
 
     if self._fired_timers:
       for timer_firing in self._fired_timers:
+        print 'self._fired_timers has timer_firing:', timer_firing
         evaluator.process_timer_wrapper(timer_firing)
 
     if self._input_bundle:
@@ -353,6 +355,7 @@ class TransformExecutor(_ExecutorService.CallableTask):
               self._applied_ptransform, tag, value)
 
     self._completion_callback.handle_result(self, self._input_bundle, result)
+    print '... leaving attempt_call'
     return result
 
 
@@ -565,6 +568,13 @@ class _ExecutorServiceParallelExecutor(object):
       if self._is_executing():
         # There are some bundles still in progress.
         return False
+
+      # TODO: Add the move of this 4 lines from _is_executing to here.
+      watermark_manager = self._executor.evaluation_context._watermark_manager
+      _, any_unfired_realtime_timers = watermark_manager.extract_all_timers()
+      if any_unfired_realtime_timers:
+        return False
+
       else:
         if self._executor.evaluation_context.is_done():
           self._executor.visible_updates.offer(
@@ -585,6 +595,7 @@ class _ExecutorServiceParallelExecutor(object):
       Returns:
         True if timers fired.
       """
+      print '--> inside _fire_timers (_MonitorTask in executor)'
       transform_fired_timers, _ = (
           self._executor.evaluation_context.extract_all_timers())
       for applied_ptransform, fired_timers in transform_fired_timers:
@@ -599,6 +610,8 @@ class _ExecutorServiceParallelExecutor(object):
         self._executor.schedule_consumption(
             applied_ptransform, empty_bundle, fired_timers,
             timer_completion_callback)
+      print 'transform_fired_timers:', transform_fired_timers
+      print '... leaving _fire_timers'
       return bool(transform_fired_timers)
 
     def _is_executing(self):
@@ -608,10 +621,12 @@ class _ExecutorServiceParallelExecutor(object):
         True if there are any timers set or if there is at least
         one non-blocked TransformExecutor active."""
 
-      watermark_manager = self._executor.evaluation_context._watermark_manager
-      _, any_unfired_realtime_timers = watermark_manager.extract_all_timers()
-      if any_unfired_realtime_timers:
-        return True
+      # TODO: remove from comment the realtime_timer (moved to _should_shutdown)
+
+      # watermark_manager = self._executor.evaluation_context._watermark_manager
+      # _, any_unfired_realtime_timers = watermark_manager.extract_all_timers()
+      # if any_unfired_realtime_timers:
+      #   return True
 
       executors = self._executor.transform_executor_services.executors
       if not executors:
@@ -639,7 +654,9 @@ class _ExecutorServiceParallelExecutor(object):
       if timers_fired:
         return
 
+      print 'timers_fired in _add_work_if_necessary:', timers_fired
       if self._is_executing():
+      # elif self._is_executing():
         # We have at least one executor that can proceed without adding
         # additional work.
         return

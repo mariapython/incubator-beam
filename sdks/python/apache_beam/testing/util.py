@@ -82,6 +82,7 @@ def equal_to(expected):
   def _equal(actual):
     sorted_expected = sorted(expected)
     sorted_actual = sorted(actual)
+    print 'sorted_actual', sorted_actual
     if sorted_expected != sorted_actual:
       raise BeamAssertException(
           'Failed assert: %r == %r' % (sorted_expected, sorted_actual))
