@@ -307,7 +307,8 @@ class TestStreamTest(unittest.TestCase):
                    | 'side TestStream' >> TestStream()
                    .add_elements([window.TimestampedValue(2, 2)])
                    .add_elements([window.TimestampedValue(1, 1)])
-                   .add_elements([window.TimestampedValue(4, 4)]))
+                   .add_elements([window.TimestampedValue(4, 4)])
+                   )
 
     class RecordFn(beam.DoFn):
       def process(self,

@@ -73,6 +73,8 @@ class _SideInputsContainer(object):
     self._lock = threading.Lock()
     self._views = {}
     self._transform_to_views = collections.defaultdict(list)
+    self._view_to_blocked_tasks = collections.defaultdict(list)
+    self._view_to_watermark = collections.defaultdict(list)
 
     for view in views:
       self._views[view] = _SideInputView(view)
@@ -83,12 +85,19 @@ class _SideInputsContainer(object):
                     if self._views.values() else '[]')
     return '_SideInputsContainer(_views=%s)' % views_string
 
-  def get_value_or_schedule_after_output(self, side_input, task):
+  def get_value_or_schedule_after_output(self, side_input, task, block_until=WatermarkManager.WATERMARK_POS_INF):
     with self._lock:
       view = self._views[side_input]
+      # Don't do the check for has_result, as things are not binary now
+      # just have an attribute for view called watermark and compare that
+      # to block_until (.block is not needed)
+      # use: if view.watermark < block_until:
       if not view.has_result:
         view.callable_queue.append(task)
         task.blocked = True
+        # TODO(mariagh): Determine a good name for _UnpickledSideInput vars
+        # and _SideInputView vars to be kept consistently
+        self._view_to_blocked_tasks[side_input].append((task, block_until))
       return (view.has_result, view.value)
 
   def add_values(self, side_input, values):
@@ -121,8 +130,19 @@ class _SideInputsContainer(object):
 
   def _update_watermarks_for_view(self, view, watermark):
     unblocked_tasks = []
+    # TODO: update view_to_watermark
+    self._view_to_watermark[view].append(watermark)
+
     if watermark.input_watermark == WatermarkManager.WATERMARK_POS_INF:
       unblocked_tasks = self.finalize_value_and_get_tasks(view)
+      return unblocked_tasks
+
+    # Unblock and finalize tasks
+    for task, block_until in self._view_to_blocked_tasks[view]:
+      if watermark.input_watermark >= block_until:
+        unblocked_tasks += self.finalize_value_and_get_tasks(view)
+        del self._view_to_blocked_tasks[view]
+
     return unblocked_tasks
 
   def _pvalue_to_value(self, view, values):
