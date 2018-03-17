@@ -287,6 +287,8 @@ class TransformExecutor(_ExecutorService.CallableTask):
     metrics_container = MetricsContainer(self._applied_ptransform.full_label)
     scoped_metrics_container = ScopedMetricsContainer(metrics_container)
 
+    # TODO(BEAM-3818): Call get_value_or_schedule_after_output with
+    # an appropriate block_until param
     for side_input in self._applied_ptransform.side_inputs:
       if side_input not in self._side_input_values:
         has_result, value = (
