@@ -57,9 +57,8 @@ class _SideInputView(object):
     self.has_result = False
 
   def __repr__(self):
-    elements_string = (
-        ', '.join(
-            str(elm) for elm in self.elements) if self.elements else '<empty>')
+    elements_string = (', '.join(str(elm) for elm in self.elements)
+                       if self.elements else '[]')
     return '_SideInputView(elements=%s)' % elements_string
 
 
@@ -80,9 +79,8 @@ class _SideInputsContainer(object):
       self._transform_to_views[view.pvalue.producer].append(view)
 
   def __repr__(self):
-    views_string = (
-        ', '.join(str(elm) for elm in self._views.values())
-        if self._views.values() else [])
+    views_string = (', '.join(str(elm) for elm in self._views.values())
+                    if self._views.values() else '[]')
     return '_SideInputsContainer(_views=%s)' % views_string
 
   def get_value_or_schedule_after_output(self, side_input, task):
@@ -180,7 +178,7 @@ class EvaluationContext(object):
     self._side_inputs_container = _SideInputsContainer(views)
     self._watermark_manager = WatermarkManager(
         clock, root_transforms, value_to_consumers,
-        self._transform_keyed_states, self._side_inputs_container)
+        self._transform_keyed_states)
     self._pending_unblocked_tasks = []
     self._counter_factory = counters.CounterFactory()
     self._metrics = DirectMetrics()

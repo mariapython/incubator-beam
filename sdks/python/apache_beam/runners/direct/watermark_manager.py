@@ -38,14 +38,13 @@ class WatermarkManager(object):
   WATERMARK_NEG_INF = MIN_TIMESTAMP
 
   def __init__(self, clock, root_transforms, value_to_consumers,
-               transform_keyed_states, side_inputs_container):
+               transform_keyed_states):
     self._clock = clock
     self._root_transforms = root_transforms
     self._value_to_consumers = value_to_consumers
     self._transform_keyed_states = transform_keyed_states
     # AppliedPTransform -> TransformWatermarks
     self._transform_to_watermarks = {}
-    self._side_inputs_container = side_inputs_container
 
     for root_transform in root_transforms:
       self._transform_to_watermarks[root_transform] = _TransformWatermarks(
@@ -146,7 +145,7 @@ class WatermarkManager(object):
               unblocked_tasks.extend(
                   self._refresh_watermarks(consumer, side_inputs_container))
       unblocked_tasks.extend(
-          self._side_inputs_container.update_watermarks_for_transform(
+          side_inputs_container.update_watermarks_for_transform(
               applied_ptransform, tw))
     return unblocked_tasks
 
