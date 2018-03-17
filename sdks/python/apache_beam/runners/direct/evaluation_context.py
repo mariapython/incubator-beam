@@ -57,9 +57,10 @@ class _SideInputView(object):
     self.has_result = False
 
   def __repr__(self):
-    elements = ', '.join([
-        str(elm) for elm in self.elements] if self.elements else ['<empty>'])
-    return '_SideInputView(elements=%s)' % elements
+    elements_string = (
+        ', '.join(
+            str(elm) for elm in self.elements) if self.elements else '<empty>')
+    return '_SideInputView(elements=%s)' % elements_string
 
 
 class _SideInputsContainer(object):
@@ -79,10 +80,10 @@ class _SideInputsContainer(object):
       self._transform_to_views[view.pvalue.producer].append(view)
 
   def __repr__(self):
-    views = ', '.join([
-        str(elm) for elm in self._views.values()
-        ] if self._views.values() else [])
-    return '_SideInputsContainer(_views=%s)' % views
+    views_string = (
+        ', '.join(str(elm) for elm in self._views.values())
+        if self._views.values() else [])
+    return '_SideInputsContainer(_views=%s)' % views_string
 
   def get_value_or_schedule_after_output(self, side_input, task):
     with self._lock:
@@ -114,7 +115,7 @@ class _SideInputsContainer(object):
       return result
 
   def update_watermarks_for_transform(self, ptransform, watermark):
-    # Collect tasks that get unblocked as the workflow progresses
+    # Collect tasks that get unblocked as the workflow progresses.
     unblocked_tasks = []
     for view in self._transform_to_views[ptransform]:
       unblocked_tasks.extend(self._update_watermarks_for_view(view, watermark))
@@ -242,6 +243,7 @@ class EvaluationContext(object):
                 view,
                 committed_bundle.get_elements_iterable(make_copy=True))
 
+      # Tasks generated from unblocked side inputs as the watermark progresses.
       tasks = self._watermark_manager.update_watermarks(
           completed_bundle, result.transform, completed_timers,
           committed_bundles, unprocessed_bundles, result.keyed_watermark_holds,

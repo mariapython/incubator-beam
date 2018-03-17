@@ -276,7 +276,9 @@ class TestStreamTest(unittest.TestCase):
                   side=beam.DoFn.SideInputParam):
         yield (elm, ts, side)
 
-    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side)) | beam.Map(recorded_elements) # pylint: disable=line-too-long, unused-variable
+    records = (main_stream     # pylint: disable=unused-variable
+               | beam.ParDo(RecordFn(), beam.pvalue.AsList(side))
+               | beam.Map(recorded_elements))
     p.run()
 
     # TODO(BEAM-3377): Remove after assert_that in streaming is fixed.
@@ -301,8 +303,6 @@ class TestStreamTest(unittest.TestCase):
                    .advance_watermark_to(10)
                    .add_elements(['e'])
                    .advance_processing_time(11))
-    # TODO(mariagh): Fix this
-    # main_stream = p | TestStream()  # this stalls the pipeline
     side_stream = (p
                    | 'side TestStream' >> TestStream()
                    .add_elements([window.TimestampedValue(2, 2)])
@@ -316,7 +316,9 @@ class TestStreamTest(unittest.TestCase):
                   side=beam.DoFn.SideInputParam):
         yield (elm, ts, side)
 
-    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side_stream)) | beam.Map(recorded_elements) # pylint: disable=line-too-long, unused-variable
+    records = (main_stream        # pylint: disable=unused-variable
+               | beam.ParDo(RecordFn(), beam.pvalue.AsList(side_stream))
+               | beam.Map(recorded_elements))
 
     p.run()
 
