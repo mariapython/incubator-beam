@@ -326,6 +326,173 @@ class TestStreamTest(unittest.TestCase):
     # TODO(BEAM-3377): Remove after assert_that in streaming is fixed.
     self.assertEqual([('e', Timestamp(10), [2, 1, 4])], result)
 
+  def test_basic_execution_sideinputs_batch_window(self):
+
+    # TODO(BEAM-3377): Remove after assert_that in streaming is fixed.
+    global result     # pylint: disable=global-variable-undefined
+    result = []
+
+    def recorded_elements(elem):
+      print 'elem:', elem
+      result.append(elem)
+      return elem
+
+    options = PipelineOptions()
+    options.view_as(StandardOptions).streaming = True
+    p = TestPipeline(options=options)
+
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(10)
+                   .add_elements(['e']))
+    side = (p
+            | beam.Create([2, 1, 4])
+            | beam.Map(lambda t: window.TimestampedValue(t, t))
+            | beam.WindowInto(window.FixedWindows(2)))
+
+    class RecordFn(beam.DoFn):
+      def process(self,
+                  elm=beam.DoFn.ElementParam,
+                  ts=beam.DoFn.TimestampParam,
+                  side=beam.DoFn.SideInputParam):
+        print 'xxxxxxxxxx'
+        print 'elm', elm, 'side', side
+        print 'xxxxxxxxxx'
+
+        yield (elm, ts, side)
+
+    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side)) | beam.Map(recorded_elements) # pylint: disable=line-too-long, unused-variable
+    p.run()
+
+    # TODO(BEAM-3377): Remove after assert_that in streaming is fixed.
+    self.assertEqual([('e', Timestamp(10), [2, 1, 4])], result)
+
+  def test_basic_execution_sideinputs_basic_window(self):
+    options = PipelineOptions()
+    options.view_as(StandardOptions).streaming = True
+    p = TestPipeline(options=options)
+
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(1)
+                   .add_elements(['a1', 'a2', 'a3', 'a4'])
+                   .add_elements(['b'])
+                   .advance_watermark_to(5)
+                   .add_elements('c')
+                   | 'main windowInto' >> beam.WindowInto(window.FixedWindows(1))
+                   )
+
+    side_stream = (p
+                   | 'side TestStream' >> TestStream()
+                   .add_elements([window.TimestampedValue(1, 10)])
+                   .advance_watermark_to(20)
+                   .add_elements([window.TimestampedValue(2, 20)])
+                   | 'side windowInto' >> beam.WindowInto(window.FixedWindows(3))
+                   )
+
+
+    class RecordFn(beam.DoFn):
+      def process(self,
+                  elm=beam.DoFn.ElementParam,
+                  ts=beam.DoFn.TimestampParam,
+                  side=beam.DoFn.SideInputParam):
+        print 'xxxxxxxxxx'
+        print 'elm', elm, 'side', side, 'ts', ts
+        print 'xxxxxxxxxx'
+
+        yield (elm, ts, side)
+
+    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side_stream)) # pylint: disable=line-too-long, unused-variable
+    p.run()
+
+  def test_basic_execution_sideinputs_window(self):
+    options = PipelineOptions()
+    options.view_as(StandardOptions).streaming = True
+    p = TestPipeline(options=options)
+
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(1)
+                   .add_elements(['a1', 'a2', 'a3', 'a4'])
+                   .add_elements(['b'])
+                   .advance_watermark_to(5)
+                   .add_elements('c')
+                   .add_elements('d')
+                   .advance_watermark_to(10)
+                   .add_elements('e')
+                   .advance_watermark_to(11)
+                   | 'main windowInto' >> beam.WindowInto(window.FixedWindows(1))
+                   )
+
+    side_stream = (p
+                   | 'side TestStream' >> TestStream()
+                   .add_elements([window.TimestampedValue(1, 1)])
+                   .advance_watermark_to(2)
+                   .add_elements([window.TimestampedValue(2, 2)])
+                   .advance_watermark_to(3)
+                   .add_elements([window.TimestampedValue(4, 4)])
+                   | beam.WindowInto(window.FixedWindows(3))
+                   )
+
+
+    class RecordFn(beam.DoFn):
+      def process(self,
+                  elm=beam.DoFn.ElementParam,
+                  ts=beam.DoFn.TimestampParam,
+                  side=beam.DoFn.SideInputParam):
+        print 'xxxxxxxxxx'
+        print 'elm', elm, 'side', side, 'ts', ts
+        print 'xxxxxxxxxx'
+
+        yield (elm, ts, side)
+
+    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side_stream)) # pylint: disable=line-too-long, unused-variable
+    p.run()
+
+
+  def test_basic_execution_sideinputs_window2(self):
+    options = PipelineOptions()
+    options.view_as(StandardOptions).streaming = True
+    p = TestPipeline(options=options)
+
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(1)
+                   .add_elements(['a1', 'a2', 'a3', 'a4'])
+                   .add_elements(['b'])
+                   .advance_watermark_to(5)
+                   .add_elements('c')
+                   .add_elements('d')
+                   .advance_watermark_to(10)
+                   .add_elements('e')
+                   .advance_watermark_to(11)
+                   | 'main windowInto' >> beam.WindowInto(window.FixedWindows(1))
+                   )
+
+    side_stream = (p
+                   | 'side TestStream' >> TestStream()
+                   .add_elements([window.TimestampedValue(1, 10)])
+                   .advance_watermark_to(20)
+                   .add_elements([window.TimestampedValue(2, 20)])
+                   .advance_watermark_to(30)
+                   .add_elements([window.TimestampedValue(4, 40)])
+                   | beam.WindowInto(window.FixedWindows(3))
+                   )
+
+
+    class RecordFn(beam.DoFn):
+      def process(self,
+                  elm=beam.DoFn.ElementParam,
+                  ts=beam.DoFn.TimestampParam,
+                  side=beam.DoFn.SideInputParam):
+        print 'xxxxxxxxxx'
+        print 'elm', elm, 'side', side, 'ts', ts
+        print 'xxxxxxxxxx'
+
+        yield (elm, ts, side)
+
+    records = main_stream | beam.ParDo(RecordFn(), beam.pvalue.AsList(side_stream)) # pylint: disable=line-too-long, unused-variable
+    p.run()
 
 if __name__ == '__main__':
   unittest.main()

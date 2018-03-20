@@ -139,7 +139,8 @@ class _TransformEvaluationState(object):
     self.executor_service.submit(work)
 
   def complete(self, completed_work):
-    self.scheduled.remove(completed_work)
+    if completed_work in self.scheduled:
+      self.scheduled.remove(completed_work)
 
 
 class _ParallelEvaluationState(_TransformEvaluationState):
@@ -263,7 +264,7 @@ class TransformExecutor(_ExecutorService.CallableTask):
   completion callback.
   """
 
-  _MAX_RETRY_PER_BUNDLE = 4
+  _MAX_RETRY_PER_BUNDLE = 1
 
   def __init__(self, transform_evaluator_registry, evaluation_context,
                input_bundle, fired_timers, applied_ptransform,
@@ -283,9 +284,16 @@ class TransformExecutor(_ExecutorService.CallableTask):
 
   def call(self):
     self._call_count += 1
-    assert self._call_count <= (1 + len(self._applied_ptransform.side_inputs))
+    # assert self._call_count <= (1 + len(self._applied_ptransform.side_inputs))
     metrics_container = MetricsContainer(self._applied_ptransform.full_label)
     scoped_metrics_container = ScopedMetricsContainer(metrics_container)
+
+    # print 'input bundle:', self._input_bundle._elements, self._applied_ptransform
+    # for elem in self._input_bundle.get_elements_iterable():
+    #   print '... elem in bundle:', elem
+
+    # print 'input bundle:', self._input_bundle._elements[0]._appended_values, self._applied_ptransform
+    # max_end_of_window =
 
     # TODO(BEAM-3818): Call get_value_or_schedule_after_output with
     # an appropriate block_until param

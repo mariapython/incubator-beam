@@ -28,6 +28,7 @@ from apache_beam.runners.direct.watermark_manager import WatermarkManager
 from apache_beam.transforms import sideinputs
 from apache_beam.transforms.trigger import InMemoryUnmergedState
 from apache_beam.utils import counters
+from apache_beam.utils.timestamp import MIN_TIMESTAMP
 
 
 class _ExecutionContext(object):
@@ -74,7 +75,7 @@ class _SideInputsContainer(object):
     self._views = {}
     self._transform_to_side_inputs = collections.defaultdict(list)
     self._side_input_to_blocked_tasks = collections.defaultdict(list)
-    self._side_input_to_watermark = collections.defaultdict(list)
+    # self._side_input_to_watermark = collections.defaultdict(list)
 
     for side in side_inputs:
       self._views[side] = _SideInputView(side)
@@ -88,36 +89,60 @@ class _SideInputsContainer(object):
   def get_value_or_schedule_after_output(self, side_input, task, block_until=WatermarkManager.WATERMARK_POS_INF):
     with self._lock:
       view = self._views[side_input]
+
+      # TODO(mariagh): The line above assumes that there is one window per bundle
+      # which is what's given by TestStream. It neeeds to handle a more generic
+      # window for the main input  -- Done!
+      # input_window = task._input_bundle._elements[0].windows[-1]
+      latest_main_input_window = task._input_bundle._elements[0].windows[0]
+      for elem in task._input_bundle.get_elements_iterable():
+        if elem.windows[0].end > latest_main_input_window.end:
+          latest_main_input_window = elem.windows[0]
+      # window projected from main onto side input
+      window_mapping_fn = side_input._view_options().get(
+          'window_mapping_fn', sideinputs._global_window_mapping_fn)
+      main_onto_side_window = window_mapping_fn(latest_main_input_window)
+      print 'view.has_result:', view.has_result, task._applied_ptransform
+      print 'latest_main_input_window:', latest_main_input_window
+      print 'main_onto_side_window:', main_onto_side_window
+      print 'view.watermark.input_watermark:', view.watermark.input_watermark
+      # if not view.has_result:
       # Don't do the check for has_result, as things are not binary now
       # just have an attribute for view called watermark and compare that
-      # to block_until (.block is not needed)
+      # to block_until (.blocked is not needed)
       # use: if view.watermark < block_until:
-      if not view.has_result:
+      # TODO(mariagh): if not view.has_result is still needed when the side_input's
+      # watermark is faster than the main_input's watermark. I would think the
+      # second condition is enough, but it is not. I don't understand why.
+      # This seems to be related to the presence of early results / calling
+      # finalize_value multiple times on the same view.
+      if not view.has_result or view.watermark.input_watermark < main_onto_side_window.end:
         view.callable_queue.append(task)
         task.blocked = True
         # TODO(mariagh): Determine a good name for _UnpickledSideInput vars
-        # and _SideInputView vars to be kept consistently
-        self._side_input_to_blocked_tasks[side_input].append((task, block_until))
+        # and _SideInputView vars to be kept consistently -- Done!
+        self._side_input_to_blocked_tasks[side_input].append((task, main_onto_side_window.end))
       return (view.has_result, view.value)
 
   def add_values(self, side_input, values):
     with self._lock:
       view = self._views[side_input]
-      assert not view.has_result
+      # assert not view.has_result
       view.elements.extend(values)
 
   def finalize_value_and_get_tasks(self, side_input):
     with self._lock:
       view = self._views[side_input]
-      assert not view.has_result
-      assert view.value is None
-      assert view.callable_queue is not None
+      # view.watermark.input_watermark = WatermarkManager.WATERMARK_POS_INF
+      # assert not view.has_result
+      # assert view.value is None
+      # assert view.callable_queue is not None
       view.value = self._pvalue_to_value(side_input, view.elements)
-      view.elements = None
+      # view.elements = None
       result = tuple(view.callable_queue)
       for task in result:
         task.blocked = False
-      view.callable_queue = None
+      # view.callable_queue = None   # In the presence of early results, tasks stay
       view.has_result = True
       return result
 
@@ -125,31 +150,30 @@ class _SideInputsContainer(object):
     # Collect tasks that get unblocked as the workflow progresses.
     unblocked_tasks = []
     for side in self._transform_to_side_inputs[ptransform]:
-      unblocked_tasks.extend(self._update_watermarks_for_view(side, watermark))
+      unblocked_tasks.extend(self._update_watermarks_for_side_input(side, watermark))
     return unblocked_tasks
 
-  def _update_watermarks_for_view(self, side_input, watermark):
+  def _update_watermarks_for_side_input(self, side_input, watermark):
+    print '--> inside _update_watermarks_for_side_input'
     unblocked_tasks = []
-    # TODO: update _side_input_to_watermark
-    self._side_input_to_watermark[side_input] = watermark   # ccy: make watermark an attribute of the side_input
-
-    if watermark.input_watermark == WatermarkManager.WATERMARK_POS_INF:
-      unblocked_tasks = self.finalize_value_and_get_tasks(side_input)
-      return unblocked_tasks
+    view = self._views[side_input]
+    view.watermark = watermark
 
     # Unblock and finalize tasks
     for task, block_until in self._side_input_to_blocked_tasks[side_input]:
-      if watermark.input_watermark >= block_until:
+      if watermark.input_watermark >= block_until and view.elements:
+        print 'early results'   # results are finalized many times now
+                                # necessitating some changes to the number
+                                # of calls and complete_work in the executor
         unblocked_tasks += self.finalize_value_and_get_tasks(side_input)
-        del self._side_input_to_blocked_tasks[side_input]
 
     return unblocked_tasks
 
-  def _pvalue_to_value(self, view, values):
-    """Given a side input view, returns the associated value in requested form.
+  def _pvalue_to_value(self, side_input, values):
+    """Given a side input, returns the associated value in its requested form.
 
     Args:
-      view: SideInput for the requested side input.
+      side_input: _UnpickledSideInput object.
       values: Iterable values associated with the side input.
 
     Returns:
@@ -158,7 +182,7 @@ class _SideInputsContainer(object):
     Raises:
       ValueError: If values cannot be converted into the requested form.
     """
-    return sideinputs.SideInputMap(type(view), view._view_options(), values)
+    return sideinputs.SideInputMap(type(side_input), side_input._view_options(), values)
 
 
 class EvaluationContext(object):
