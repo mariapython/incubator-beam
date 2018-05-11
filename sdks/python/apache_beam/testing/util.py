@@ -34,6 +34,9 @@ from apache_beam.transforms.ptransform import PTransform
 from apache_beam.transforms.util import CoGroupByKey
 from apache_beam.utils.annotations import experimental
 
+# debugging imports
+from apache_beam.utils import timestamp
+
 __all__ = [
     'assert_that',
     'equal_to',
@@ -85,6 +88,7 @@ def equal_to_per_window(expected_window_to_elements):
   def matcher(elements):
     actual_elements_in_window, window = elements
     if window in expected_window_to_elements:
+      print 'actual_elements_in_window, window', actual_elements_in_window, window
       expected_elements_in_window = list(
           expected_window_to_elements[window])
       sorted_expected = sorted(expected_elements_in_window)
@@ -158,9 +162,31 @@ def assert_that(actual, matcher, custom_windowing=None,
 
   class AddWindow(DoFn):
     def process(self, element, window=DoFn.WindowParam):
+      print 'def', element, window, timestamp
       yield element, window
 
+  class PrintDo(DoFn):
+
+    def __init__(self, label):
+      self.label = label
+
+    def process(self, element, timestamp=DoFn.TimestampParam,
+                window=DoFn.WindowParam):
+      print self.label, element, window, timestamp
+      yield element
+
   class AssertThat(PTransform):
+
+    def match(_, actual):
+      matcher(actual)
+
+    def side_expand(self, pcoll):
+      ret = (
+        pcoll.pipeline | 'singleton' >> Create([None])
+        | Map(AssertThat.match, pvalue.AsList(actual | WindowInto(windowing)))
+        )
+      return ret
+
 
     def expand(self, pcoll):
       if reify_windows:
@@ -170,9 +196,14 @@ def assert_that(actual, matcher, custom_windowing=None,
       keyed_actual = (
           pcoll
           | WindowInto(custom_windowing or window.GlobalWindows())
-          | "ToVoidKey" >> Map(lambda v: (None, v)))
+          # | WindowInto(custom_windowing)  # To make sure it takes a custome one
+          | 'AfterWindow' >> ParDo(PrintDo('AfterWindow'))
+          | "ToVoidKey" >> Map(lambda v: (None, v))
+          | 'AfterVoidKey' >> ParDo(PrintDo('AfterVoidKey'))
+          )
       plain_actual = ((keyed_singleton, keyed_actual)
                       | "Group" >> CoGroupByKey()
+                      | 'AfterCoGBK' >> ParDo(PrintDo('AfterCoGBK'))
                       | "Unkey" >> Map(lambda k_values: k_values[1][1]))
 
       if custom_windowing:
