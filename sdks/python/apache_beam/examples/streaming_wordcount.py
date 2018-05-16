@@ -37,6 +37,11 @@ from apache_beam.transforms.core import DoFn
 from apache_beam.transforms.core import ParDo
 from apache_beam.utils import timestamp
 
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
+from apache_beam.testing.util import equal_to_per_window
+import re
+
 def run(argv=None):
   """Build and run the pipeline."""
   parser = argparse.ArgumentParser()
@@ -73,11 +78,11 @@ def run(argv=None):
       print self.label, element, window_value, timestamp
       yield element
 
-  class AddTimestampDoFn(DoFn):
+  # class AddTimestampDoFn(DoFn):
 
-    def process(self, element):
-      print 'element:', element
-      yield beam.window.TimestampedValue(element, int(element))
+  #   def process(self, element):
+  #     print 'element:', element
+  #     yield beam.window.TimestampedValue(element, int(element))
 
 
 
@@ -88,6 +93,15 @@ def run(argv=None):
   else:
     lines = p | beam.io.ReadStringsFromPubSub(topic=known_args.input_topic)
 
+  def gbk_format(expected):
+    def matcher(elements):
+      actual_elements_in_window, window = elements
+      for elm in actual_elements_in_window:
+        assert re.match(r'\S+:\s+\d+', elm) is not None
+      print 'checking format:', elements
+    return matcher
+
+
   # Count the occurrences of each word.
   def count_ones(word_ones):
     (word, ones) = word_ones
@@ -95,7 +109,7 @@ def run(argv=None):
 
   counts = (lines
             | 'PrintDoBeforeTs' >> (beam.ParDo(PrintDo('BeforeTs')))
-            | 'AddTimestamp' >> beam.ParDo(AddTimestampDoFn())
+            # | 'AddTimestamp' >> beam.ParDo(AddTimestampDoFn())
             | 'PrintAfterTs' >> (beam.ParDo(PrintDo('AfterTs')))
             | 'split' >> (beam.ParDo(WordExtractingDoFn())
                           .with_output_types(six.text_type))
@@ -111,6 +125,12 @@ def run(argv=None):
     return '%s: %d' % (word, count)
 
   output = counts | 'format' >> beam.Map(format_result)
+
+  assert_that(
+      output,
+      gbk_format('lol'),
+      custom_windowing=window.FixedWindows(15),
+      label='assert gbk format')
 
   # Write to PubSub.
   # pylint: disable=expression-not-assigned
