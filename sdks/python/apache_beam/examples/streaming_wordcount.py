@@ -32,6 +32,10 @@ from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.options.pipeline_options import StandardOptions
 
+# from apache_beam.transforms.counts import ParDo
+from apache_beam.transforms.core import DoFn
+from apache_beam.transforms.core import ParDo
+from apache_beam.utils import timestamp
 
 def run(argv=None):
   """Build and run the pipeline."""
@@ -58,6 +62,25 @@ def run(argv=None):
   pipeline_options.view_as(StandardOptions).streaming = True
   p = beam.Pipeline(options=pipeline_options)
 
+
+  class PrintDo(DoFn):
+
+    def __init__(self, label):
+      self.label = label
+
+    def process(self, element, timestamp=DoFn.TimestampParam,
+                window_value=DoFn.WindowParam):
+      print self.label, element, window_value, timestamp
+      yield element
+
+  class AddTimestampDoFn(DoFn):
+
+    def process(self, element):
+      print 'element:', element
+      yield beam.window.TimestampedValue(element, int(element))
+
+
+
   # Read from PubSub into a PCollection.
   if known_args.input_subscription:
     lines = p | beam.io.ReadStringsFromPubSub(
@@ -71,10 +94,14 @@ def run(argv=None):
     return (word, sum(ones))
 
   counts = (lines
+            | 'PrintDoBeforeTs' >> (beam.ParDo(PrintDo('BeforeTs')))
+            | 'AddTimestamp' >> beam.ParDo(AddTimestampDoFn())
+            | 'PrintAfterTs' >> (beam.ParDo(PrintDo('AfterTs')))
             | 'split' >> (beam.ParDo(WordExtractingDoFn())
                           .with_output_types(six.text_type))
             | 'pair_with_one' >> beam.Map(lambda x: (x, 1))
             | beam.WindowInto(window.FixedWindows(15, 0))
+            | 'PrintDoAfterWindow' >> (beam.ParDo(PrintDo('AfterWindow')))
             | 'group' >> beam.GroupByKey()
             | 'count' >> beam.Map(count_ones))
 
